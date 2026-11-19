@@ -1,0 +1,73 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack project
+        run: |
+          for z in *.zip; do unzip -o "$z" -d .; done
+          ls -la
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: |
+          npm install
+          bash prepare.sh
+
+      - name: Create Android project
+        run: |
+          rm -rf android
+          npx cap add android
+
+      - name: Storage permission for Android 10 and older
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />\n\n    <application android:requestLegacyExternalStorage="true"#' $M
+
+      - name: App icon
+        continue-on-error: true
+        run: npx --yes @capacitor/assets@4 generate --android --iconBackgroundColor '#1f4e5f' --splashBackgroundColor '#1f4e5f'
+
+      - name: Sync web code
+        run: npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk pdf-filler.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-filler-apk
+          path: pdf-filler.apk
+
+      - name: Publish as a release (direct download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: PDF Filler build ${{ github.run_number }}
+          files: pdf-filler.apk
